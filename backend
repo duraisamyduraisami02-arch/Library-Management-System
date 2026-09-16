@@ -1,0 +1,642 @@
+from flask import Flask, request, jsonify
+import sqlite3
+from datetime import datetime
+
+app = Flask(__name__)
+
+DATABASE = "library.db"
+
+
+# =====================================================
+# DATABASE CONNECTION
+# =====================================================
+
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# =====================================================
+# CREATE DATABASE TABLES
+# =====================================================
+
+def create_tables():
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Books table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS books (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            author TEXT NOT NULL,
+            category TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            available INTEGER NOT NULL
+        )
+    """)
+
+    # Members table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT NOT NULL
+        )
+    """)
+
+    # Transactions table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            book_id INTEGER NOT NULL,
+            member_id INTEGER NOT NULL,
+            issue_date TEXT NOT NULL,
+            return_date TEXT,
+            status TEXT NOT NULL,
+            FOREIGN KEY(book_id) REFERENCES books(id),
+            FOREIGN KEY(member_id) REFERENCES members(id)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+# =====================================================
+# HOME
+# =====================================================
+
+@app.route("/")
+def home():
+    return jsonify({
+        "message": "Library Management System Backend Running",
+        "status": "success"
+    })
+
+
+# =====================================================
+# BOOK APIs
+# =====================================================
+
+# GET ALL BOOKS
+@app.route("/books", methods=["GET"])
+def get_books():
+
+    conn = get_db()
+
+    books = conn.execute(
+        "SELECT * FROM books"
+    ).fetchall()
+
+    conn.close()
+
+    return jsonify([
+        dict(book) for book in books
+    ])
+
+
+# ADD BOOK
+@app.route("/books", methods=["POST"])
+def add_book():
+
+    data = request.get_json()
+
+    title = data.get("title")
+    author = data.get("author")
+    category = data.get("category")
+    quantity = data.get("quantity")
+
+    if not title or not author or not category or not quantity:
+        return jsonify({
+            "error": "All fields are required"
+        }), 400
+
+    conn = get_db()
+
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO books
+        (title, author, category, quantity, available)
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        title,
+        author,
+        category,
+        quantity,
+        quantity
+    ))
+
+    conn.commit()
+
+    book_id = cursor.lastrowid
+
+    conn.close()
+
+    return jsonify({
+        "message": "Book added successfully",
+        "book_id": book_id
+    }), 201
+
+
+# UPDATE BOOK
+@app.route("/books/<int:book_id>", methods=["PUT"])
+def update_book(book_id):
+
+    data = request.get_json()
+
+    title = data.get("title")
+    author = data.get("author")
+    category = data.get("category")
+    quantity = data.get("quantity")
+
+    conn = get_db()
+
+    old_book = conn.execute(
+        "SELECT * FROM books WHERE id = ?",
+        (book_id,)
+    ).fetchone()
+
+    if not old_book:
+
+        conn.close()
+
+        return jsonify({
+            "error": "Book not found"
+        }), 404
+
+    # Calculate currently issued copies
+    issued = old_book["quantity"] - old_book["available"]
+
+    if quantity < issued:
+
+        conn.close()
+
+        return jsonify({
+            "error": "Quantity cannot be less than issued books"
+        }), 400
+
+    available = quantity - issued
+
+    conn.execute("""
+        UPDATE books
+        SET title = ?,
+            author = ?,
+            category = ?,
+            quantity = ?,
+            available = ?
+        WHERE id = ?
+    """, (
+        title,
+        author,
+        category,
+        quantity,
+        available,
+        book_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "message": "Book updated successfully"
+    })
+
+
+# DELETE BOOK
+@app.route("/books/<int:book_id>", methods=["DELETE"])
+def delete_book(book_id):
+
+    conn = get_db()
+
+    active_transaction = conn.execute("""
+        SELECT * FROM transactions
+        WHERE book_id = ?
+        AND status = 'Issued'
+    """, (book_id,)).fetchone()
+
+    if active_transaction:
+
+        conn.close()
+
+        return jsonify({
+            "error": "Book is currently issued"
+        }), 400
+
+    result = conn.execute(
+        "DELETE FROM books WHERE id = ?",
+        (book_id,)
+    )
+
+    conn.commit()
+
+    conn.close()
+
+    if result.rowcount == 0:
+
+        return jsonify({
+            "error": "Book not found"
+        }), 404
+
+    return jsonify({
+        "message": "Book deleted successfully"
+    })
+
+
+# =====================================================
+# MEMBER APIs
+# =====================================================
+
+# GET ALL MEMBERS
+@app.route("/members", methods=["GET"])
+def get_members():
+
+    conn = get_db()
+
+    members = conn.execute(
+        "SELECT * FROM members"
+    ).fetchall()
+
+    conn.close()
+
+    return jsonify([
+        dict(member) for member in members
+    ])
+
+
+# ADD MEMBER
+@app.route("/members", methods=["POST"])
+def add_member():
+
+    data = request.get_json()
+
+    name = data.get("name")
+    email = data.get("email")
+    phone = data.get("phone")
+
+    if not name or not email or not phone:
+
+        return jsonify({
+            "error": "All fields are required"
+        }), 400
+
+    conn = get_db()
+
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO members
+        (name, email, phone)
+        VALUES (?, ?, ?)
+    """, (
+        name,
+        email,
+        phone
+    ))
+
+    conn.commit()
+
+    member_id = cursor.lastrowid
+
+    conn.close()
+
+    return jsonify({
+        "message": "Member added successfully",
+        "member_id": member_id
+    }), 201
+
+
+# UPDATE MEMBER
+@app.route("/members/<int:member_id>", methods=["PUT"])
+def update_member(member_id):
+
+    data = request.get_json()
+
+    name = data.get("name")
+    email = data.get("email")
+    phone = data.get("phone")
+
+    conn = get_db()
+
+    result = conn.execute("""
+        UPDATE members
+        SET name = ?,
+            email = ?,
+            phone = ?
+        WHERE id = ?
+    """, (
+        name,
+        email,
+        phone,
+        member_id
+    ))
+
+    conn.commit()
+
+    conn.close()
+
+    if result.rowcount == 0:
+
+        return jsonify({
+            "error": "Member not found"
+        }), 404
+
+    return jsonify({
+        "message": "Member updated successfully"
+    })
+
+
+# DELETE MEMBER
+@app.route("/members/<int:member_id>", methods=["DELETE"])
+def delete_member(member_id):
+
+    conn = get_db()
+
+    active_transaction = conn.execute("""
+        SELECT * FROM transactions
+        WHERE member_id = ?
+        AND status = 'Issued'
+    """, (member_id,)).fetchone()
+
+    if active_transaction:
+
+        conn.close()
+
+        return jsonify({
+            "error": "Member has an issued book"
+        }), 400
+
+    result = conn.execute(
+        "DELETE FROM members WHERE id = ?",
+        (member_id,)
+    )
+
+    conn.commit()
+
+    conn.close()
+
+    if result.rowcount == 0:
+
+        return jsonify({
+            "error": "Member not found"
+        }), 404
+
+    return jsonify({
+        "message": "Member deleted successfully"
+    })
+
+
+# =====================================================
+# ISSUE BOOK
+# =====================================================
+
+@app.route("/issue", methods=["POST"])
+def issue_book():
+
+    data = request.get_json()
+
+    book_id = data.get("book_id")
+    member_id = data.get("member_id")
+
+    if not book_id or not member_id:
+
+        return jsonify({
+            "error": "Book ID and Member ID are required"
+        }), 400
+
+    conn = get_db()
+
+    book = conn.execute(
+        "SELECT * FROM books WHERE id = ?",
+        (book_id,)
+    ).fetchone()
+
+    member = conn.execute(
+        "SELECT * FROM members WHERE id = ?",
+        (member_id,)
+    ).fetchone()
+
+    if not book:
+
+        conn.close()
+
+        return jsonify({
+            "error": "Book not found"
+        }), 404
+
+    if not member:
+
+        conn.close()
+
+        return jsonify({
+            "error": "Member not found"
+        }), 404
+
+    if book["available"] <= 0:
+
+        conn.close()
+
+        return jsonify({
+            "error": "Book is not available"
+        }), 400
+
+    # Check duplicate issue
+    existing = conn.execute("""
+        SELECT * FROM transactions
+        WHERE book_id = ?
+        AND member_id = ?
+        AND status = 'Issued'
+    """, (
+        book_id,
+        member_id
+    )).fetchone()
+
+    if existing:
+
+        conn.close()
+
+        return jsonify({
+            "error": "This member already has this book"
+        }), 400
+
+    issue_date = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    # Create transaction
+    conn.execute("""
+        INSERT INTO transactions
+        (book_id, member_id, issue_date, status)
+        VALUES (?, ?, ?, ?)
+    """, (
+        book_id,
+        member_id,
+        issue_date,
+        "Issued"
+    ))
+
+    # Decrease available books
+    conn.execute("""
+        UPDATE books
+        SET available = available - 1
+        WHERE id = ?
+    """, (book_id,))
+
+    conn.commit()
+
+    conn.close()
+
+    return jsonify({
+        "message": "Book issued successfully"
+    })
+
+
+# =====================================================
+# RETURN BOOK
+# =====================================================
+
+@app.route("/return/<int:transaction_id>", methods=["PUT"])
+def return_book(transaction_id):
+
+    conn = get_db()
+
+    transaction = conn.execute("""
+        SELECT * FROM transactions
+        WHERE id = ?
+    """, (transaction_id,)).fetchone()
+
+    if not transaction:
+
+        conn.close()
+
+        return jsonify({
+            "error": "Transaction not found"
+        }), 404
+
+    if transaction["status"] == "Returned":
+
+        conn.close()
+
+        return jsonify({
+            "error": "Book already returned"
+        }), 400
+
+    return_date = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    # Update transaction
+    conn.execute("""
+        UPDATE transactions
+        SET return_date = ?,
+            status = 'Returned'
+        WHERE id = ?
+    """, (
+        return_date,
+        transaction_id
+    ))
+
+    # Increase available books
+    conn.execute("""
+        UPDATE books
+        SET available = available + 1
+        WHERE id = ?
+    """, (
+        transaction["book_id"],
+    ))
+
+    conn.commit()
+
+    conn.close()
+
+    return jsonify({
+        "message": "Book returned successfully"
+    })
+
+
+# =====================================================
+# TRANSACTION APIs
+# =====================================================
+
+@app.route("/transactions", methods=["GET"])
+def get_transactions():
+
+    conn = get_db()
+
+    transactions = conn.execute("""
+        SELECT
+            transactions.id,
+            books.title AS book,
+            members.name AS member,
+            transactions.issue_date,
+            transactions.return_date,
+            transactions.status
+        FROM transactions
+        JOIN books
+        ON transactions.book_id = books.id
+        JOIN members
+        ON transactions.member_id = members.id
+        ORDER BY transactions.id DESC
+    """).fetchall()
+
+    conn.close()
+
+    return jsonify([
+        dict(transaction)
+        for transaction in transactions
+    ])
+
+
+# =====================================================
+# DASHBOARD API
+# =====================================================
+
+@app.route("/dashboard", methods=["GET"])
+def dashboard():
+
+    conn = get_db()
+
+    total_books = conn.execute("""
+        SELECT COALESCE(SUM(quantity), 0)
+        FROM books
+    """).fetchone()[0]
+
+    available_books = conn.execute("""
+        SELECT COALESCE(SUM(available), 0)
+        FROM books
+    """).fetchone()[0]
+
+    total_members = conn.execute("""
+        SELECT COUNT(*)
+        FROM members
+    """).fetchone()[0]
+
+    issued_books = total_books - available_books
+
+    conn.close()
+
+    return jsonify({
+        "total_books": total_books,
+        "available_books": available_books,
+        "total_members": total_members,
+        "issued_books": issued_books
+    })
+
+
+# =====================================================
+# RUN APPLICATION
+# =====================================================
+
+if __name__ == "__main__":
+
+    create_tables()
+
+    app.run(
+        debug=True,
+        host="127.0.0.1",
+        port=5000
+    )
