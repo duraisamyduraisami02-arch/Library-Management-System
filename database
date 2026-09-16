@@ -1,0 +1,162 @@
+-- =====================================================
+-- LIBRARY MANAGEMENT SYSTEM DATABASE
+-- Database: SQLite
+-- File: library_database.sql
+-- =====================================================
+
+
+-- =====================================================
+-- 1. CREATE BOOKS TABLE
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS books (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    title TEXT NOT NULL,
+
+    author TEXT NOT NULL,
+
+    category TEXT NOT NULL,
+
+    quantity INTEGER NOT NULL,
+
+    available INTEGER NOT NULL
+
+);
+
+
+-- =====================================================
+-- 2. CREATE MEMBERS TABLE
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS members (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    name TEXT NOT NULL,
+
+    email TEXT NOT NULL,
+
+    phone TEXT NOT NULL
+
+);
+
+
+-- =====================================================
+-- 3. CREATE TRANSACTIONS TABLE
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS transactions (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    book_id INTEGER NOT NULL,
+
+    member_id INTEGER NOT NULL,
+
+    issue_date TEXT NOT NULL,
+
+    return_date TEXT,
+
+    status TEXT NOT NULL,
+
+    FOREIGN KEY (book_id)
+        REFERENCES books(id),
+
+    FOREIGN KEY (member_id)
+        REFERENCES members(id)
+
+);
+
+
+-- =====================================================
+-- 4. INSERT SAMPLE BOOKS
+-- =====================================================
+
+INSERT INTO books
+(title, author, category, quantity, available)
+VALUES
+('The Alchemist', 'Paulo Coelho', 'Fiction', 5, 5),
+
+('Wings of Fire', 'A.P.J. Abdul Kalam', 'Biography', 4, 4),
+
+('Clean Code', 'Robert C. Martin', 'Programming', 3, 3),
+
+('Python Programming', 'Mark Lutz', 'Programming', 5, 5),
+
+('Database System Concepts', 'Abraham Silberschatz', 'Database', 4, 4);
+
+
+-- =====================================================
+-- 5. INSERT SAMPLE MEMBERS
+-- =====================================================
+
+INSERT INTO members
+(name, email, phone)
+VALUES
+('Arun Kumar', 'arun@gmail.com', '9876543210'),
+
+('Priya Sharma', 'priya@gmail.com', '9876543211'),
+
+('Rahul Kumar', 'rahul@gmail.com', '9876543212'),
+
+('Divya Raj', 'divya@gmail.com', '9876543213');
+
+
+-- =====================================================
+-- 6. VIEW ALL BOOKS
+-- =====================================================
+
+SELECT * FROM books;
+
+
+-- =====================================================
+-- 7. VIEW ALL MEMBERS
+-- =====================================================
+
+SELECT * FROM members;
+
+
+-- =====================================================
+-- 8. VIEW ALL TRANSACTIONS
+-- =====================================================
+
+SELECT * FROM transactions;
+
+
+-- =====================================================
+-- 9. CHECK AVAILABLE BOOKS
+-- =====================================================
+
+SELECT
+    id,
+    title,
+    author,
+    category,
+    available
+FROM books
+WHERE available > 0;
+
+
+-- =====================================================
+-- 10. DASHBOARD DATA
+-- =====================================================
+
+SELECT
+    (SELECT COALESCE(SUM(quantity), 0)
+     FROM books) AS total_books,
+
+    (SELECT COALESCE(SUM(available), 0)
+     FROM books) AS available_books,
+
+    (SELECT COUNT(*)
+     FROM members) AS total_members,
+
+    (
+        (SELECT COALESCE(SUM(quantity), 0)
+         FROM books)
+        -
+        (SELECT COALESCE(SUM(available), 0)
+         FROM books)
+    ) AS issued_books;
